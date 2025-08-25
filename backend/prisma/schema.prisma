@@ -137,3 +137,8 @@ model Report {
 
   createdAt   DateTime @default(now())
 }
+
+model AllowedStudentEmail {
+  id    String @id @default(cuid())
+  email String @unique
+}
