@@ -7,11 +7,13 @@ generator client {
   provider = "prisma-client-js"
 }
 
-enum Role {
+//
+// Enums
+//
+enum UserRole {
   STUDENT
-  CLASS_TEACHER
+  TEACHER
   HOD
-  SECURITY
   ADMIN
 }
 
@@ -26,119 +28,135 @@ enum OutpassStatus {
   APPROVED
   REJECTED
   CANCELLED
+  EXITED
+  REENTERED
 }
 
-enum ReportType {
-  MISBEHAVIOR
-  LATE_RETURN
-  FAKE_PASS
-  OTHER
-}
-
+//
+// Models
+//
 model User {
-  id        String   @id @default(cuid())
-  name      String
-  email     String   @unique
-  password  String
-  role      Role
-
-  // Relations
-  student   Student?
-  teacher   ClassTeacher?
-  hod       HOD?
-  security  Security?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model Student {
   id          String   @id @default(cuid())
-  rollNo      String   @unique
-  userId      String   @unique
-  user        User     @relation(fields: [userId], references: [id])
-  
-  parent      Parent?
-  outpasses   Outpass[]
-  reports     Report[]
-  blocked     Boolean  @default(false) // if blocked by class teacher
+  email       String   @unique
+  password    String
+  role        UserRole
+  name        String
+  rollNumber  String?
+  branch      String?
+  department  String?
+  parentPhone String?
 
+  studentProfile StudentProfile?
+  teacherProfile TeacherProfile?
+  hodProfile     HODProfile?
+  adminProfile   AdminProfile?
+
+  teacherApprovals  OutpassRequest[] @relation("TeacherApprovals")
+  hodApprovals      OutpassRequest[] @relation("HODApprovals")
+  securityExits     OutpassRequest[] @relation("SecurityExits")
+  securityReentries OutpassRequest[] @relation("SecurityReentries")
+
+  incidentReports   IncidentReport[] // reportedBy
+}
+
+model StudentProfile {
+  id             String           @id @default(cuid())
+  user           User             @relation(fields: [userId], references: [id])
+  userId         String           @unique
+
+  // class teacher = TeacherProfile
+  classTeacher   TeacherProfile?  @relation("ClassTeacherStudents", fields: [classTeacherId], references: [id])
   classTeacherId String?
-  classTeacher   ClassTeacher? @relation(fields: [classTeacherId], references: [id])
+
+  // hod = HODProfile
+  hod            HODProfile?      @relation("HODStudents", fields: [hodId], references: [id])
+  hodId          String?
+
+  outpasses      OutpassRequest[] @relation("OutpassStudent")
+  groupOutpasses OutpassRequest[] @relation("OutpassGroupMembers")
+
+  notes          Note[]
 }
 
-model Parent {
-  id        String   @id @default(cuid())
-  name      String
-  phone     String   @unique
-  studentId String   @unique
-  student   Student  @relation(fields: [studentId], references: [id])
-}
+model TeacherProfile {
+  id         String           @id @default(cuid())
+  user       User             @relation(fields: [userId], references: [id])
+  userId     String           @unique
 
-model ClassTeacher {
-  id        String   @id @default(cuid())
-  userId    String   @unique
-  user      User     @relation(fields: [userId], references: [id])
-  
-  students  Student[]
-  approvals Outpass[] @relation("TeacherApproval")
-}
-
-model HOD {
-  id         String   @id @default(cuid())
+  students   StudentProfile[] @relation("ClassTeacherStudents")
   department String
-  userId     String   @unique
-  user       User     @relation(fields: [userId], references: [id])
-
-  approvals  Outpass[]
+  notes      Note[]
 }
 
-model Security {
-  id        String   @id @default(cuid())
-  userId    String   @unique
-  user      User     @relation(fields: [userId], references: [id])
+model HODProfile {
+  id         String           @id @default(cuid())
+  user       User             @relation(fields: [userId], references: [id])
+  userId     String           @unique
 
-  reports   Report[]
+  students   StudentProfile[] @relation("HODStudents")
+  department String
 }
 
-model Outpass {
-  id            String        @id @default(cuid())
-  type          OutpassType
-  reason        String
-  status        OutpassStatus @default(PENDING)
+model AdminProfile {
+  id     String @id @default(cuid())
+  user   User   @relation(fields: [userId], references: [id])
+  userId String @unique
+}
 
+model OutpassRequest {
+  id            String           @id @default(cuid())
+  student       StudentProfile   @relation("OutpassStudent", fields: [studentId], references: [id])
   studentId     String
-  student       Student       @relation(fields: [studentId], references: [id])
+  groupMembers  StudentProfile[] @relation("OutpassGroupMembers")
+
+  type          OutpassType
+  status        OutpassStatus
+  reason        String
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   approvedByTeacherId String?
-  teacher            ClassTeacher? @relation("TeacherApproval", fields: [approvedByTeacherId], references: [id])
+  approvedByTeacher   User?   @relation("TeacherApprovals", fields: [approvedByTeacherId], references: [id])
 
-  approvedByHodId String?
-  hod             HOD? @relation(fields: [approvedByHodId], references: [id])
+  approvedByHodId     String?
+  approvedByHod       User?   @relation("HODApprovals", fields: [approvedByHodId], references: [id])
 
-  issuedAt     DateTime? 
-  expiresAt    DateTime?
-  qrCode       String? // QR/OTP string
+  qrCode         String?
+  otp            String?
+  validUntil     DateTime?
 
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  exitMarkedById    String?
+  exitMarkedBy      User?   @relation("SecurityExits", fields: [exitMarkedById], references: [id])
+
+  reentryMarkedById String?
+  reentryMarkedBy   User?   @relation("SecurityReentries", fields: [reentryMarkedById], references: [id])
+
+  incidentReports   IncidentReport[]
 }
 
-model Report {
-  id          String      @id @default(cuid())
-  type        ReportType
+model Note {
+  id        String          @id @default(cuid())
+  teacher   TeacherProfile  @relation(fields: [teacherId], references: [id])
+  teacherId String
+  student   StudentProfile  @relation(fields: [studentId], references: [id])
+  studentId String
+  content   String
+  createdAt DateTime        @default(now())
+  private   Boolean         @default(true)
+}
+
+model IncidentReport {
+  id          String         @id @default(cuid())
+  outpass     OutpassRequest @relation(fields: [outpassId], references: [id])
+  outpassId   String
+  reportedBy  User           @relation(fields: [reportedById], references: [id])
+  reportedById String
   description String
-
-  studentId   String
-  student     Student     @relation(fields: [studentId], references: [id])
-
-  securityId  String
-  security    Security    @relation(fields: [securityId], references: [id])
-
-  createdAt   DateTime @default(now())
+  createdAt   DateTime       @default(now())
+  type        String
 }
 
-model AllowedStudentEmail {
-  id    String @id @default(cuid())
+model allowedStudentEmail{
+  id String @id @default(cuid())
   email String @unique
 }
