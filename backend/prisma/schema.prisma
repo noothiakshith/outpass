@@ -31,6 +31,7 @@ enum OutpassStatus {
   EXITED
   REENTERED
   MOVED
+  EXPIRED
 }
 
 //
@@ -113,8 +114,9 @@ model OutpassRequest {
   type          OutpassType
   status        OutpassStatus
   reason        String
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  outpassDate   DateTime         @default(now()) // Date for which outpass is requested (must be today)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
 
   approvedByTeacherId String?
   approvedByTeacher   User?   @relation("TeacherApprovals", fields: [approvedByTeacherId], references: [id])
@@ -124,7 +126,8 @@ model OutpassRequest {
 
   qrCode         String?
   otp            String?
-  validUntil     DateTime?
+  otpExpiresAt   DateTime?        // OTP expires 5 hours after generation
+  validUntil     DateTime?        // Overall outpass validity (end of outpass date)
 
   exitMarkedById    String?
   exitMarkedBy      User?   @relation("SecurityExits", fields: [exitMarkedById], references: [id])

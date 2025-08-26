@@ -104,15 +104,21 @@ async function main() {
     parentPhone: student.parentPhone,
   });
 
-  // Add student email to allowedStudentEmail
-  const allowedEmail = await prisma.allowedStudentEmail.create({
-    data: {
-      email: 'student@example.com',
-    },
-  });
-  console.log('Allowed Student Email Created:', {
-    email: allowedEmail.email,
-  });
+  // Add student emails to allowedStudentEmail
+  const allowedEmails = [
+    'student@example.com',
+    'john.doe@student.edu',
+    'jane.smith@student.edu',
+    'mike.wilson@student.edu',
+    'sarah.brown@student.edu'
+  ];
+
+  for (const email of allowedEmails) {
+    await prisma.allowedStudentEmail.create({
+      data: { email },
+    });
+    console.log('Allowed Student Email Created:', { email });
+  }
 
   console.log('✅ Seeding completed successfully!');
 }

@@ -44,7 +44,7 @@ router.get(
 
 router.post(
     "/outpass/approve/:id",
-    authenticateRole(["HOD"]),  // ✅ only HOD can access
+    authenticateRole(["HOD"]),
     async (req, res) => {
       const passid = req.params.id;
       try {
@@ -54,30 +54,26 @@ router.post(
         });
         if (!hod) return res.status(404).json({ error: "HOD not found" });
 
-
-        const outpassconfrom = await prisma.outpassRequest.update({
-            where:{
-                id:passid,
-                status:"MOVED",
-            },
-            data:{
-                status:"APPROVED"
-            }
-        })
-        // Fetch the outpass
+        // Fetch the outpass first to validate it's in MOVED status
         const outpass = await prisma.outpassRequest.findUnique({
           where: { id: passid },
           include: { student: { include: { user: true } } },
         });
   
         if (!outpass) return res.status(404).json({ error: "Outpass not found" });
-        if (outpass.status === "APPROVED")
-          return res.status(400).json({ error: "Already approved" });
+        if (outpass.status !== "MOVED") 
+          return res.status(400).json({ error: "Outpass must be moved by teacher first" });
+        if (outpass.approvedByHodId !== req.user.id)
+          return res.status(403).json({ error: "Not assigned to this HOD" });
   
-        // ✅ generate OTP
+        // Generate OTP
         const otp = crypto.randomInt(100000, 999999).toString();
+        
+        // Set OTP expiry to 5 hours from now
+        const otpExpiresAt = new Date();
+        otpExpiresAt.setHours(otpExpiresAt.getHours() + 5);
   
-        // ✅ QR payload
+        // QR payload
         const qrPayload = {
           outpassId: outpass.id,
           otp,
@@ -87,18 +83,20 @@ router.post(
           branch: outpass.student.branch,
           approvedByTeacher: outpass.approvedByTeacherId,
           approvedByHod: req.user.id,
+          otpExpiresAt: otpExpiresAt.toISOString(),
         };
   
-        // ✅ generate QR
+        // Generate QR code
         const qrCode = await QRCode.toDataURL(JSON.stringify(qrPayload));
   
-        // ✅ Only HOD can change status here
+        // Update outpass with approval, OTP, and QR code
         const updated = await prisma.outpassRequest.update({
           where: { id: passid },
           data: {
             status: "APPROVED",
             approvedByHodId: req.user.id,
             otp,
+            otpExpiresAt,
             qrCode,
           },
           include: { student: { include: { user: true } } },

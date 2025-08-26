@@ -2,6 +2,7 @@ import express from "express";
 import { z } from "zod";
 import { authenticateRole } from "../authmiddleware.js";
 import { PrismaClient } from "@prisma/client";
+import { getOTPTimeRemaining, checkAndExpireOutpasses } from "./utils/outpassUtils.js";
 
 const prisma = new PrismaClient();
 const router = express.Router();
@@ -37,12 +38,21 @@ router.post(
           error: "Student does not have a class teacher or HOD assigned",
         });
 
+      // Set outpass date to today only
+      const today = new Date();
+      today.setHours(0, 0, 0, 0); // Start of today
+      
+      const endOfToday = new Date(today);
+      endOfToday.setHours(23, 59, 59, 999); // End of today
+
       const outpass = await prisma.outpassRequest.create({
         data: {
           studentId: studentProfile.id,
           reason,
           type,
           status: "PENDING",
+          outpassDate: today,
+          validUntil: endOfToday, // Outpass expires at end of day
           approvedByTeacherId: studentProfile.classTeacher.user.id,
           approvedByHodId: studentProfile.hod.user.id,
         },
@@ -68,6 +78,9 @@ router.get(
   authenticateRole(["STUDENT"]),
   async (req, res) => {
     try {
+      // Run expiry check first
+      await checkAndExpireOutpasses();
+
       const studentProfile = await prisma.studentProfile.findUnique({
         where: { userId: req.user.id },
       });
@@ -84,7 +97,13 @@ router.get(
         orderBy: { createdAt: "desc" },
       });
 
-      return res.status(200).json({ outpasses });
+      // Add time remaining info for approved outpasses
+      const outpassesWithTimeInfo = outpasses.map(outpass => ({
+        ...outpass,
+        otpTimeRemaining: outpass.status === "APPROVED" ? getOTPTimeRemaining(outpass.otpExpiresAt) : null,
+      }));
+
+      return res.status(200).json({ outpasses: outpassesWithTimeInfo });
     } catch (err) {
       console.error(err);
       return res.status(500).json({ error: "Internal server error" });
