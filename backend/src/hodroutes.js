@@ -2,8 +2,9 @@ import express from "express";
 const router = express.Router();
 import { PrismaClient } from "@prisma/client";
 import { authenticateRole } from "../authmiddleware.js";
-import qr from "qrcode";
-import crypto from "crypto";
+
+import QRCode from "qrcode";
+import crypto from "crypto";  // also needed for OTP
 
 const prisma = new PrismaClient();
 
@@ -40,38 +41,80 @@ router.get(
   }
 );
 
-/**
- * HOD → Approve Outpass
- */
+
 router.post(
-  "/outpass/approve/:id",
-  authenticateRole(["HOD"]),
-  async (req, res) => {
-    const passid = req.params.id;
-    try {
-      const hod = await prisma.hODProfile.findUnique({
-        where: { userId: req.user.id },
-      });
-      if (!hod) return res.status(404).json({ error: "HOD not found" });
+    "/outpass/approve/:id",
+    authenticateRole(["HOD"]),  // ✅ only HOD can access
+    async (req, res) => {
+      const passid = req.params.id;
+      try {
+        // Verify HOD profile exists
+        const hod = await prisma.hODProfile.findUnique({
+          where: { userId: req.user.id },
+        });
+        if (!hod) return res.status(404).json({ error: "HOD not found" });
 
-      const outpass = await prisma.outpassRequest.update({
-        where: {
-          id: passid,
-          approvedByHodId: req.user.id,
-        },
-        data: {
-          status: "APPROVED",
-        },
-      });
 
-      res.status(200).json(outpass);
-    } catch (err) {
-      console.log(err);
-      res.status(500).json({ error: "Internal server error" });
+        const outpassconfrom = await prisma.outpassRequest.update({
+            where:{
+                id:passid,
+                status:"MOVED",
+            },
+            data:{
+                status:"APPROVED"
+            }
+        })
+        // Fetch the outpass
+        const outpass = await prisma.outpassRequest.findUnique({
+          where: { id: passid },
+          include: { student: { include: { user: true } } },
+        });
+  
+        if (!outpass) return res.status(404).json({ error: "Outpass not found" });
+        if (outpass.status === "APPROVED")
+          return res.status(400).json({ error: "Already approved" });
+  
+        // ✅ generate OTP
+        const otp = crypto.randomInt(100000, 999999).toString();
+  
+        // ✅ QR payload
+        const qrPayload = {
+          outpassId: outpass.id,
+          otp,
+          studentName: outpass.student.user.name,
+          rollNo: outpass.student.rollNo,
+          department: outpass.student.department,
+          branch: outpass.student.branch,
+          approvedByTeacher: outpass.approvedByTeacherId,
+          approvedByHod: req.user.id,
+        };
+  
+        // ✅ generate QR
+        const qrCode = await QRCode.toDataURL(JSON.stringify(qrPayload));
+  
+        // ✅ Only HOD can change status here
+        const updated = await prisma.outpassRequest.update({
+          where: { id: passid },
+          data: {
+            status: "APPROVED",
+            approvedByHodId: req.user.id,
+            otp,
+            qrCode,
+          },
+          include: { student: { include: { user: true } } },
+        });
+  
+        res.status(200).json({
+          message: "Outpass approved by HOD, OTP + QR generated",
+          outpass: updated,
+        });
+      } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Internal server error" });
+      }
     }
-  }
-);
-
+  );
+  
 /**
  * HOD → Reject Outpass
  */
@@ -104,73 +147,5 @@ router.post(
   }
 );
 
-/**
- * HOD → Generate OTP for Outpass
- */
-router.post(
-  "/outpass/otp/:id",
-  authenticateRole(["HOD"]),
-  async (req, res) => {
-    const passid = req.params.id;
-    try {
-    const checkpassstatus = await prisma.outpassRequest.findUnique({
-        where:{
-            id:passid,
-            status:"APPROVED"
-        }
-    })
-    if(checkpassstatus){
-        
-      const otp = crypto.randomInt(100000, 999999).toString();
-
-      const outpass = await prisma.outpassRequest.update({
-        where: { id: passid, approvedByHodId: req.user.id },
-        data: { otp },
-      });
-
-      res.status(200).json({ message: "OTP generated", otp });
-    }
-    else{
-        res.status(400).json({message:"rejected"})
-    }
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: "Failed to generate OTP" });
-    }
-  }
-);
-
-/**
- * HOD → Generate QR Code for Outpass
- */
-router.get(
-  "/outpass/qr/:id",
-  authenticateRole(["HOD"]),
-  async (req, res) => {
-    const passid = req.params.id;
-    try {
-      const outpass = await prisma.outpassRequest.findUnique({
-        where: { id: passid },
-        include: { student: { include: { user: true } } },
-      });
-
-      if (!outpass) return res.status(404).json({ error: "Outpass not found" });
-
-      const qrData = {
-        passId: outpass.id,
-        student: outpass.student.user.email,
-        status: outpass.status,
-        otp: outpass.otp || "N/A",
-      };
-
-      const qrCode = await qr.toDataURL(JSON.stringify(qrData));
-
-      res.status(200).json({ qrCode });
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: "Failed to generate QR" });
-    }
-  }
-);
 
 export default router;
